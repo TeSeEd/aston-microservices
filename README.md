@@ -1,66 +1,391 @@
 # Aston Microservices
 
-Учебный проект на **Java 21 и Spring Boot 3.5.6**.
+Учебный микросервисный проект на **Java 21, Spring Boot 3.5.6 и Spring Cloud 2025.0.3**.
 
-Проект состоит из двух микросервисов: `user-service` для управления пользователями и `notification-service` для отправки уведомлений по электронной почте.
+Проект реализует управление пользователями, обработку событий через Apache Kafka и отправку email-уведомлений. В системе используются PostgreSQL, Transactional Outbox, REST API, Springdoc OpenAPI, HATEOAS и HAL.
 
-Для обмена событиями используется Apache Kafka. Данные хранятся в PostgreSQL.
+В рамках домашнего задания №7 добавлены четыре микросервисных паттерна:
+
+- **API Gateway** — единая точка входа в REST API.
+- **Service Discovery** — обнаружение микросервисов через Netflix Eureka.
+- **Circuit Breaker** — защита от сбоев через Resilience4j.
+- **External Configuration** — централизованная конфигурация через Spring Cloud Config Server.
 
 Для примера используется название сайта **AstonHub**.
 
 ## Возможности
 
-- Создание, получение, обновление и удаление пользователей через REST API.
+- Создание, получение, обновление и удаление пользователей.
 - Валидация данных и централизованная обработка ошибок.
-- Документирование REST API с помощью Springdoc OpenAPI и Swagger UI.
-- Поддержка HATEOAS и HAL для навигации по ресурсам пользователей.
-- Отправка событий Kafka при создании и удалении пользователя.
+- Документирование REST API через Springdoc OpenAPI и Swagger UI.
+- Поддержка HATEOAS и HAL.
+- Отправка событий Kafka при создании и удалении пользователей.
 - Transactional Outbox для надёжной публикации событий.
-- Повторные попытки отправки событий при ошибках.
-- Получение и обработка Kafka-событий.
-- Защита от повторной обработки одинаковых событий.
-- Отправка уведомлений через SMTP.
+- Повторные попытки отправки событий.
+- Обработка Kafka-событий и защита от дубликатов.
+- Отправка email-уведомлений через SMTP.
 - Повторные попытки отправки писем.
 - REST API для отправки произвольного письма.
-- Запуск проекта через Docker Compose.
+- Регистрация и обнаружение микросервисов в Eureka.
+- Маршрутизация HTTP-запросов через API Gateway.
+- Circuit Breaker с fallback-ответом при недоступности сервиса уведомлений.
+- Загрузка внешней конфигурации через Config Server.
+- Запуск инфраструктуры через Docker Compose.
 
 ## Технологии
 
-- Java 21
-- Spring Boot 3.5.6
-- Spring Web
-- Spring Data JPA, Hibernate
-- Springdoc OpenAPI, Swagger UI
-- Spring HATEOAS
-- PostgreSQL 17
-- Apache Kafka, Spring Kafka
-- Spring Mail
-- Flyway
-- Maven
-- JUnit 5, Mockito, MockMvc
-- Testcontainers 2.0.5
-- GreenMail
-- Docker Compose
-- Mailpit
+| Категория | Технологии |
+|---|---|
+| Язык | Java 21 |
+| Фреймворк | Spring Boot 3.5.6 |
+| Микросервисы | Spring Cloud 2025.0.3 |
+| Service Discovery | Netflix Eureka |
+| API Gateway | Spring Cloud Gateway WebFlux |
+| Балансировка | Spring Cloud LoadBalancer |
+| Отказоустойчивость | Spring Cloud Circuit Breaker, Resilience4j |
+| Конфигурация | Spring Cloud Config Server, Config Client |
+| REST API | Spring Web |
+| Базы данных | PostgreSQL 17, Spring Data JPA, Hibernate |
+| Миграции | Flyway |
+| Обмен событиями | Apache Kafka, Spring Kafka |
+| Документация | Springdoc OpenAPI, Swagger UI |
+| Гипермедиа | Spring HATEOAS, HAL |
+| Почта | Spring Mail, SMTP |
+| Тестирование | JUnit 5, Mockito, MockMvc, Testcontainers 2.0.5, GreenMail |
+| Сборка | Maven |
+| Контейнеризация | Docker Compose |
+| Тестовый SMTP | Mailpit |
 
-## Структура проекта
+## Архитектура
 
-Проект состоит из трёх Maven-модулей:
+### Общая схема
+
+```text
+                       HTTP Client
+                           |
+                           v
+                  API Gateway :8082
+                           |
+                  +--------+--------+
+                  |                 |
+                  v                 v
+           user-service      notification-service
+              :8080                :8081
+                  |                 |
+                  v                 v
+          PostgreSQL          PostgreSQL
+                  |
+                  v
+         Transactional Outbox
+                  |
+                  v
+             Apache Kafka
+                  |
+                  v
+         notification-service
+                  |
+                  v
+               Mailpit
+
+
+       +--------------------------+
+       | Eureka Discovery Server  |
+       |          :8761           |
+       +--------------------------+
+                  ^
+                  |
+         Регистрация и поиск
+             сервисов
+
+
+       +--------------------------+
+       | Spring Cloud Config      |
+       | Server :8888             |
+       +--------------------------+
+                  |
+                  v
+             config-repo/
+                  |
+         Внешние конфигурации
+         микросервисов
+```
+
+`user-service` и `notification-service` обмениваются событиями асинхронно через Kafka. Gateway используется для входящих HTTP-запросов.
+
+### Структура проекта
+
+Проект состоит из шести Maven-модулей.
 
 ```text
 aston-microservices/
 ├── event-contracts/
 ├── user-service/
 ├── notification-service/
+├── discovery-server/
+├── api-gateway/
+├── config-server/
+├── config-repo/
+│   ├── user-service.properties
+│   ├── notification-service.properties
+│   └── api-gateway.properties
 ├── docker-compose.yml
 └── pom.xml
 ```
 
-**event-contracts** — общие классы событий для обмена сообщениями между сервисами.
+**event-contracts** — общие контракты событий Kafka.
 
-**user-service** — REST API пользователей с документацией OpenAPI и поддержкой HATEOAS. При создании и удалении пользователя сохраняет событие в Outbox, после чего публикует его в Kafka.
+**user-service** — REST API пользователей, бизнес-логика, HATEOAS, Transactional Outbox и публикация Kafka-событий.
 
-**notification-service** — обрабатывает события Kafka, сохраняет уведомления в PostgreSQL и отправляет письма.
+**notification-service** — обработка Kafka-событий, сохранение уведомлений и отправка email. Также предоставляет HTTP API для отправки произвольных писем.
+
+**discovery-server** — сервер Netflix Eureka для регистрации и обнаружения микросервисов.
+
+**api-gateway** — единая точка входа для HTTP-клиентов, маршрутизация через Eureka, балансировка и Circuit Breaker.
+
+**config-server** — сервер централизованной конфигурации на базе Spring Cloud Config.
+
+**config-repo** — внешние файлы настроек микросервисов.
+
+---
+
+## Микросервисные паттерны
+
+### 1. Service Discovery — Netflix Eureka
+
+Eureka Server работает на порту `8761`.
+
+Каждый микросервис регистрируется в Eureka под своим `spring.application.name`.
+
+Зарегистрированные приложения:
+
+- `USER-SERVICE`
+- `NOTIFICATION-SERVICE`
+- `API-GATEWAY`
+
+Адрес панели управления:
+
+http://localhost:8761
+
+Gateway использует Eureka для поиска экземпляров сервисов по логическим именам, а не по жёстко заданным IP-адресам.
+
+Для контейнерного запуска используется адрес:
+
+```properties
+eureka.client.service-url.defaultZone=http://discovery-server:8761/eureka/
+```
+
+Имя `discovery-server` разрешается внутри сети Docker Compose.
+
+### 2. API Gateway — Spring Cloud Gateway
+
+Gateway работает на порту `8082` и предоставляет единую точку входа.
+
+| Путь | Целевой сервис |
+|---|---|
+| `/api/users/**` | `lb://user-service` |
+| `/api/notifications/**` | `lb://notification-service` |
+
+Префикс `lb://` означает использование Spring Cloud LoadBalancer совместно с Service Discovery.
+
+Пример получения пользователей:
+
+```http
+GET http://localhost:8082/api/users
+```
+
+Пример получения пользователя:
+
+```http
+GET http://localhost:8082/api/users/1
+```
+
+Пример отправки письма:
+
+```http
+POST http://localhost:8082/api/notifications/email
+```
+
+Прямые адреса `localhost:8080` и `localhost:8081` оставлены доступными для локальной разработки и диагностики.
+
+#### HATEOAS через Gateway
+
+Gateway передаёт информацию об исходном HTTP-запросе с помощью forwarded headers.
+
+В `user-service` используется настройка:
+
+```properties
+server.forward-headers-strategy=framework
+```
+
+Это позволяет формировать публичные HATEOAS-ссылки через Gateway:
+
+```json
+{
+  "_links": {
+    "self": {
+      "href": "http://localhost:8082/api/users/1"
+    },
+    "users": {
+      "href": "http://localhost:8082/api/users"
+    }
+  }
+}
+```
+
+Таким образом, клиенту не требуется знать внутренние адреса Docker-контейнеров.
+
+Настройка доверенных прокси в Gateway предназначена для локальной Docker-среды. При публикации системы во внешней сети её необходимо пересмотреть.
+
+### 3. Circuit Breaker — Resilience4j
+
+Circuit Breaker подключён к маршруту `notification-service` на уровне API Gateway.
+
+Используются:
+
+- Spring Cloud Circuit Breaker.
+- Resilience4j.
+- Реактивная интеграция с WebFlux.
+- Fallback-обработчик `FallbackController`.
+
+Основные параметры:
+
+| Параметр | Значение |
+|---|---|
+| slidingWindowSize | 5 |
+| minimumNumberOfCalls | 3 |
+| failureRateThreshold | 50% |
+| waitDurationInOpenState | 10 секунд |
+| permittedNumberOfCallsInHalfOpenState | 2 |
+| timeoutDuration | 3 секунды |
+
+#### Состояния Circuit Breaker
+
+**CLOSED** — обычная работа, запросы передаются в `notification-service`.
+
+**OPEN** — после достижения порога ошибок новые обращения временно блокируются.
+
+**HALF_OPEN** — после периода ожидания разрешаются пробные запросы для проверки восстановления.
+
+При сбое используется fallback:
+
+```http
+HTTP/1.1 503 Service Unavailable
+```
+
+```json
+{
+  "message": "Notification service temporarily unavailable"
+}
+```
+
+#### Проверка отказоустойчивости
+
+Сначала проверяется успешная отправка письма через Gateway с ответом `202 Accepted`.
+
+Затем останавливается сервис уведомлений:
+
+```powershell
+docker compose stop notification-service
+```
+
+Выполняются повторные POST-запросы через Gateway.
+
+При отказе возвращается HTTP `503`, а в логах Gateway было подтверждено состояние `OPEN`:
+
+```text
+CallNotPermittedException:
+CircuitBreaker 'notificationCircuitBreaker' is OPEN
+and does not permit further calls
+```
+
+После запуска сервиса:
+
+```powershell
+docker compose start notification-service
+```
+
+и обновления сведений Eureka повторные HTTP-запросы успешно возвращали `202 Accepted`.
+
+Таким образом, вручную проверены обработка отказа, переход в `OPEN` и восстановление успешной обработки запросов. Автоматизированная проверка всех переходов состояний Circuit Breaker пока не добавлена.
+
+### 4. External Configuration — Spring Cloud Config Server
+
+Config Server работает на порту `8888`.
+
+Для учебного проекта используется **native profile** — внешние файлы конфигурации хранятся в локальном каталоге `config-repo`, а не в отдельном Git-репозитории.
+
+```text
+config-repo/
+├── user-service.properties
+├── notification-service.properties
+└── api-gateway.properties
+```
+
+Config Server читает этот каталог через Docker volume в режиме только для чтения:
+
+```yaml
+volumes:
+  - ./config-repo:/app/config-repo:ro
+```
+
+Адреса проверки:
+
+- http://localhost:8888/user-service/default
+- http://localhost:8888/notification-service/default
+- http://localhost:8888/api-gateway/default
+
+Например, файл `user-service.properties` содержит:
+
+```properties
+app.config-source=external-config-server
+
+eureka.client.service-url.defaultZone=${EUREKA_SERVER_URL:http://localhost:8761/eureka/}
+```
+
+Микросервисы используют Spring Cloud Config Client для загрузки внешних параметров при запуске.
+
+Пример настройки клиента:
+
+```properties
+spring.config.import=optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
+```
+
+В Docker Compose адрес Config Server задаётся через переменную окружения:
+
+```yaml
+CONFIG_SERVER_URL: http://config-server:8888
+```
+
+Для Config Server настроен HTTP healthcheck через Spring Boot Actuator.
+
+Зависимые контейнеры используют:
+
+```yaml
+depends_on:
+  config-server:
+    condition: service_healthy
+```
+
+Это позволяет дождаться готовности Config Server перед запуском клиентов при обычном запуске через Docker Compose.
+
+#### Проверка загрузки конфигурации
+
+Пример успешной загрузки:
+
+```text
+Fetching config from server at : http://config-server:8888
+Located environment: name=user-service, profiles=[default]
+```
+
+Подключение проверено для `user-service`, `notification-service` и `api-gateway`.
+
+На текущем этапе во внешнюю конфигурацию вынесены параметры Eureka и тестовый параметр `app.config-source`. Остальные настройки, включая параметры БД, Kafka и SMTP, продолжают использовать существующую конфигурацию и переменные окружения.
+
+Благодаря `optional:configserver:` клиент может продолжить запуск с локальными настройками, если Config Server недоступен. Это поведение предназначено для текущей учебной конфигурации.
+
+---
+
+## Обмен событиями через Kafka
 
 ### Как работают уведомления
 
@@ -83,14 +408,14 @@ notification-service
 PostgreSQL (Notifications)
    |
    v
-SMTP
+SMTP (Mailpit)
 ```
 
 При создании пользователя формируется событие `USER_CREATED`, при удалении — `USER_DELETED`.
 
 События сначала сохраняются в базе данных. Если Kafka недоступна, публикация повторяется.
 
-Notification-service сохраняет уведомления и также выполняет повторные попытки отправки при ошибках SMTP.
+`notification-service` сохраняет уведомления и выполняет повторные попытки отправки при ошибках SMTP.
 
 ### Содержание писем
 
@@ -99,6 +424,7 @@ Notification-service сохраняет уведомления и также в�
 **Тема:** Добро пожаловать в AstonHub!
 
 **Текст:**
+
 > Здравствуйте! Ваш аккаунт на сайте AstonHub был успешно создан.
 
 При удалении пользователя:
@@ -106,24 +432,39 @@ Notification-service сохраняет уведомления и также в�
 **Тема:** Удаление аккаунта в AstonHub
 
 **Текст:**
+
 > Здравствуйте! Ваш аккаунт на сайте AstonHub был удалён.
 
-## Запуск через Docker
+---
 
-Для запуска необходимы Docker Desktop и Docker Compose.
+## Запуск через Docker Compose
 
-Из корневой папки проекта выполнить:
+### Требования
 
-```bash
+Для запуска необходимы:
+
+- Docker Desktop.
+- Docker Compose.
+
+Для локальной Maven-сборки также нужны Java 21 и Maven.
+
+### Запуск
+
+Из корневой папки проекта:
+
+```powershell
 docker compose up -d --build
 ```
 
-Docker Compose запускает шесть сервисов:
+Docker Compose запускает девять контейнеров.
 
-| Сервис | Назначение | Порт |
+| Сервис | Назначение | Порт на localhost |
 |---|---|---|
-| user-service | REST API пользователей | 8080 |
-| notification-service | REST API уведомлений | 8081 |
+| api-gateway | Единая точка входа REST API | 8082 |
+| discovery-server | Eureka Server | 8761 |
+| config-server | Централизованная конфигурация | 8888 |
+| user-service | Управление пользователями | 8080 |
+| notification-service | Уведомления | 8081 |
 | user-postgres | База пользователей | 5432 |
 | notification-postgres | База уведомлений | 5433 |
 | kafka | Брокер сообщений | 9092 |
@@ -131,42 +472,55 @@ Docker Compose запускает шесть сервисов:
 
 Проверка состояния контейнеров:
 
-```bash
+```powershell
 docker compose ps
 ```
 
 Просмотр логов:
 
-```bash
+```powershell
+docker compose logs -f api-gateway
+docker compose logs -f config-server
+docker compose logs -f discovery-server
 docker compose logs -f user-service
 docker compose logs -f notification-service
 ```
 
-После запуска доступны:
+### Доступные адреса
 
-- User API: http://localhost:8080/api/users
-- Notification API: http://localhost:8081/api/notifications/email
-- Swagger UI: http://localhost:8080/swagger-ui.html
-- OpenAPI JSON: http://localhost:8080/v3/api-docs
-- Mailpit: http://localhost:8025
+| Сервис | Адрес |
+|---|---|
+| API Gateway — пользователи | http://localhost:8082/api/users |
+| API Gateway — уведомления | http://localhost:8082/api/notifications/email |
+| Eureka Dashboard | http://localhost:8761 |
+| Config Server | http://localhost:8888/user-service/default |
+| Swagger UI | http://localhost:8080/swagger-ui.html |
+| OpenAPI JSON | http://localhost:8080/v3/api-docs |
+| Mailpit | http://localhost:8025 |
 
-Mailpit используется для тестирования отправки писем. Сообщения принимаются локально и не отправляются на реальные почтовые адреса.
+Swagger UI и OpenAPI JSON доступны напрямую через `user-service`. Отдельные маршруты Gateway для них не настраивались.
+
+Mailpit принимает тестовые письма локально и не отправляет их на реальные почтовые адреса.
+
+---
 
 ## REST API пользователей
 
-Базовый адрес: `http://localhost:8080/api/users`
+Основной адрес через Gateway:
+
+`http://localhost:8082/api/users`
 
 | Метод | Endpoint | Описание | Успешный статус |
 |---|---|---|---|
-| POST | /api/users | Создание пользователя | 201 Created |
-| GET | /api/users | Список пользователей | 200 OK |
-| GET | /api/users/{id} | Получение по ID | 200 OK |
-| PUT | /api/users/{id} | Обновление пользователя | 200 OK |
-| DELETE | /api/users/{id} | Удаление пользователя | 204 No Content |
+| POST | `/api/users` | Создание пользователя | 201 Created |
+| GET | `/api/users` | Список пользователей | 200 OK |
+| GET | `/api/users/{id}` | Получение по ID | 200 OK |
+| PUT | `/api/users/{id}` | Обновление пользователя | 200 OK |
+| DELETE | `/api/users/{id}` | Удаление пользователя | 204 No Content |
 
 Для некорректных данных предусмотрены ответы `400 Bad Request`, для отсутствующего пользователя — `404 Not Found`.
 
-Ответы с ошибками имеют структуру:
+Пример структуры ошибки:
 
 ```json
 {
@@ -198,64 +552,64 @@ $body = @{
 } | ConvertTo-Json
 
 Invoke-RestMethod `
-    -Uri "http://localhost:8080/api/users" `
+    -Uri "http://localhost:8082/api/users" `
     -Method Post `
     -ContentType "application/json" `
     -Body $body
 ```
 
-При успешном создании возвращается `201 Created`, заголовок `Location` со ссылкой на созданного пользователя и JSON с его данными и HATEOAS-ссылками.
+При успешном создании возвращается `201 Created`, заголовок `Location` со ссылкой на созданного пользователя и JSON с HATEOAS-ссылками.
 
-После создания пользователя формируется событие `USER_CREATED`, которое передаётся через Kafka в notification-service.
+После создания пользователя формируется событие `USER_CREATED`, которое передаётся через Kafka в `notification-service`.
 
-При удалении пользователя аналогичным образом формируется событие `USER_DELETED`.
+При удалении пользователя аналогично формируется `USER_DELETED`.
+
+---
 
 ## Swagger и OpenAPI
 
-Для документирования REST API в `user-service` используется **Springdoc OpenAPI**.
+Документирование REST API `user-service` выполняется через Springdoc OpenAPI.
 
-Документация автоматически формируется на основе Spring MVC-контроллера, DTO и аннотаций OpenAPI.
+Swagger UI:
 
-Интерактивный интерфейс доступен по адресу:
+http://localhost:8080/swagger-ui.html
 
-**http://localhost:8080/swagger-ui.html**
+OpenAPI JSON:
 
-Машиночитаемое описание OpenAPI в JSON:
-
-**http://localhost:8080/v3/api-docs**
+http://localhost:8080/v3/api-docs
 
 Документация содержит:
 
-- Описания всех пяти CRUD-операций.
+- Описания CRUD-операций.
 - Параметры и тела запросов.
 - HTTP-статусы успешных ответов и ошибок.
 - Схемы `UserRequestDto` и `ErrorResponseDto`.
-- Схемы HATEOAS-ответов отдельного пользователя и коллекции пользователей.
+- Модели HATEOAS-ответов отдельного пользователя и коллекции.
 
-Для описания HATEOAS-формата используются отдельные документационные модели:
+Для описания HATEOAS используются документационные модели:
 
-- `UserHateoasResponseDoc`
-- `UserCollectionHateoasResponseDoc`
+- `UserHateoasResponseDoc`.
+- `UserCollectionHateoasResponseDoc`.
 
-Они используются для генерации документации и не заменяют реальные DTO или объекты Spring HATEOAS.
+Они предназначены для генерации документации и не заменяют реальные DTO или Spring HATEOAS-модели.
+
+---
 
 ## HATEOAS и HAL
 
-REST API пользователей поддерживает **HATEOAS (Hypermedia as the Engine of Application State)** с использованием Spring HATEOAS.
+REST API пользователей поддерживает HATEOAS (*Hypermedia as the Engine of Application State*) с использованием Spring HATEOAS.
 
-Вместе с данными API возвращает ссылки на доступные ресурсы. Клиент может использовать эти ссылки для навигации по API.
+Применяются:
 
-Для формирования ответов применяются:
-
-- `EntityModel<UserResponseDto>` — представление отдельного пользователя со ссылками.
-- `CollectionModel<EntityModel<UserResponseDto>>` — представление коллекции пользователей.
-- `WebMvcLinkBuilder` — построение ссылок на методы контроллера.
+- `EntityModel<UserResponseDto>` — отдельный пользователь со ссылками.
+- `CollectionModel<EntityModel<UserResponseDto>>` — коллекция пользователей.
+- `WebMvcLinkBuilder` — формирование ссылок на методы контроллера.
 
 ### Получение пользователя
 
 **GET** `/api/users/1`
 
-Пример ответа:
+Пример ответа через Gateway:
 
 ```json
 {
@@ -266,24 +620,22 @@ REST API пользователей поддерживает **HATEOAS (Hypermed
   "createdAt": "2026-10-26T12:00:00",
   "_links": {
     "self": {
-      "href": "http://localhost:8080/api/users/1"
+      "href": "http://localhost:8082/api/users/1"
     },
     "users": {
-      "href": "http://localhost:8080/api/users"
+      "href": "http://localhost:8082/api/users"
     }
   }
 }
 ```
 
-Ссылка `self` указывает на текущего пользователя.
-
-Ссылка `users` позволяет перейти к коллекции всех пользователей.
+Ссылка `self` указывает на текущего пользователя, а `users` — на коллекцию пользователей.
 
 ### Получение списка пользователей
 
 **GET** `/api/users`
 
-Пример ответа:
+Пример HAL-ответа:
 
 ```json
 {
@@ -297,10 +649,10 @@ REST API пользователей поддерживает **HATEOAS (Hypermed
         "createdAt": "2026-10-26T12:00:00",
         "_links": {
           "self": {
-            "href": "http://localhost:8080/api/users/1"
+            "href": "http://localhost:8082/api/users/1"
           },
           "users": {
-            "href": "http://localhost:8080/api/users"
+            "href": "http://localhost:8082/api/users"
           }
         }
       }
@@ -308,7 +660,7 @@ REST API пользователей поддерживает **HATEOAS (Hypermed
   },
   "_links": {
     "self": {
-      "href": "http://localhost:8080/api/users"
+      "href": "http://localhost:8082/api/users"
     }
   }
 }
@@ -320,21 +672,27 @@ REST API пользователей поддерживает **HATEOAS (Hypermed
 
 Если пользователей нет, коллекция возвращается с HTTP `200 OK` и ссылкой `self`; блок `_embedded` может отсутствовать.
 
-**Важно:** после внедрения HATEOAS метод `GET /api/users` возвращает HAL-объект, а не корневой JSON-массив.
+**Важно:** `GET /api/users` возвращает HAL-объект, а не корневой JSON-массив.
 
 ### HATEOAS в остальных операциях
 
-- `POST /api/users` — `201 Created`, данные созданного пользователя со ссылками `self` и `users`.
-- `PUT /api/users/{id}` — `200 OK`, обновлённый пользователь со ссылками `self` и `users`.
+- `POST /api/users` — `201 Created`, данные и ссылки `self`, `users`.
+- `PUT /api/users/{id}` — `200 OK`, обновлённые данные и ссылки.
 - `DELETE /api/users/{id}` — `204 No Content`, без тела ответа.
 
 Бизнес-логика сервисного слоя при внедрении HATEOAS не изменялась.
 
+---
+
 ## REST API уведомлений
 
-Notification-service позволяет отправить письмо напрямую, без Kafka.
+`notification-service` позволяет отправить письмо напрямую через REST API, без Kafka.
 
 **POST** `/api/notifications/email`
+
+Основной адрес:
+
+`http://localhost:8082/api/notifications/email`
 
 Пример JSON:
 
@@ -355,11 +713,11 @@ $body = @{
     body = "Hello from AstonHub"
 } | ConvertTo-Json
 
-Invoke-RestMethod `
-    -Uri "http://localhost:8081/api/notifications/email" `
+Invoke-WebRequest `
+    -Uri "http://localhost:8082/api/notifications/email" `
     -Method Post `
-    -ContentType "application/json" `
-    -Body $body
+    -ContentType "application/json; charset=utf-8" `
+    -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
 ```
 
 При успешном принятии запроса возвращается HTTP `202 Accepted`.
@@ -368,37 +726,39 @@ Invoke-RestMethod `
 
 http://localhost:8025
 
+---
+
 ## Базы данных
 
-Для каждого микросервиса используется отдельная база PostgreSQL.
+Для каждого бизнес-микросервиса используется отдельная база PostgreSQL.
 
-**user-service:**
+### user-service
 
 - `users` — пользователи.
-- `outbox_events` — события для отправки в Kafka.
+- `outbox_events` — события для публикации в Kafka.
 
-**notification-service:**
+### notification-service
 
 - `notifications` — уведомления и их статусы.
-- `processed_user_events` — обработанные события для защиты от дубликатов.
+- `processed_user_events` — обработанные события для защиты от повторной обработки.
 
-Для управления схемой базы данных используется Flyway. Миграции применяются автоматически при запуске приложений.
+Для управления схемами используется Flyway. Миграции применяются при запуске приложений.
 
 ### Подключение к PostgreSQL
 
 База пользователей:
 
-```bash
+```powershell
 docker compose exec user-postgres psql -U user_service_user -d user_service
 ```
 
 База уведомлений:
 
-```bash
+```powershell
 docker compose exec notification-postgres psql -U notification_service_user -d notification_service
 ```
 
-Примеры SQL-запросов:
+Примеры SQL:
 
 ```sql
 SELECT * FROM users;
@@ -406,24 +766,25 @@ SELECT * FROM outbox_events;
 SELECT * FROM notifications;
 ```
 
-Каждый запрос нужно выполнять в соответствующей базе данных.
+Каждый запрос необходимо выполнять в соответствующей базе данных.
+
+---
 
 ## Тестирование
 
-В проекте используются JUnit 5, Mockito, MockMvc и Testcontainers.
+В проекте используются JUnit 5, Mockito, MockMvc, Testcontainers и GreenMail.
 
 Проверяются:
 
-- Бизнес-логика работы с пользователями.
+- Бизнес-логика управления пользователями.
 - REST API и валидация данных.
 - HTTP-статусы и обработка ошибок.
-- HATEOAS-ссылки в ответах API.
-- HAL-коллекции, включая пустой список пользователей.
+- HATEOAS-ссылки и HAL-ответы.
 - Работа с PostgreSQL.
 - Сохранение событий в Transactional Outbox.
 - Публикация Kafka-событий.
 - Обработка событий и защита от дубликатов.
-- Транзакционность сохранения обработанных событий.
+- Транзакционность обработки событий.
 - Работа репозитория уведомлений.
 - Отправка электронных писем.
 
@@ -431,17 +792,17 @@ SELECT * FROM notifications;
 
 В `UserControllerTest` используются MockMvc и Mockito.
 
-Тесты проверяют:
+Проверяются:
 
-- `POST /api/users` — статус `201`, заголовок `Location`, поля пользователя, ссылки `self` и `users`.
-- `GET /api/users/{id}` — данные пользователя и ссылки `self` и `users`.
-- `GET /api/users` — структуру `_embedded.userResponseDtoList`, данные пользователей и HATEOAS-ссылки.
-- Пустой список — HTTP `200`, отсутствие `_embedded` и наличие ссылки коллекции `self`.
-- `PUT /api/users/{id}` — обновлённые данные и HATEOAS-ссылки.
-- `DELETE /api/users/{id}` — статус `204` и пустое тело.
-- Обработку некорректных запросов и отсутствующих пользователей.
+- `POST /api/users` — статус `201`, `Location`, поля пользователя и ссылки.
+- `GET /api/users/{id}` — данные пользователя и ссылки.
+- `GET /api/users` — структура `_embedded.userResponseDtoList`.
+- Пустой список — `200 OK`, отсутствие `_embedded`, ссылка `self`.
+- `PUT /api/users/{id}` — обновление данных и ссылок.
+- `DELETE /api/users/{id}` — `204 No Content`.
+- Обработка некорректных запросов и отсутствующих пользователей.
 
-Для запуска тестов контроллера из корня проекта:
+Отдельный запуск:
 
 ```powershell
 mvn -pl user-service -am "-Dtest=UserControllerTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
@@ -449,7 +810,7 @@ mvn -pl user-service -am "-Dtest=UserControllerTest" "-Dsurefire.failIfNoSpecifi
 
 ### Интеграционные тесты SMTP
 
-Для интеграционных тестов почты используется **GreenMail** — тестовый SMTP-сервер.
+Для тестирования электронной почты используется GreenMail.
 
 Проверяются три сценария:
 
@@ -459,66 +820,117 @@ mvn -pl user-service -am "-Dtest=UserControllerTest" "-Dsurefire.failIfNoSpecifi
 
 Тесты проверяют получателя, тему и содержимое сообщения.
 
-Отдельный запуск в Windows PowerShell:
+Отдельный запуск:
 
 ```powershell
 mvn -pl notification-service -am "-Dtest=EmailIntegrationTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
 ```
 
-### Запуск всех тестов
+### Полная Maven-проверка
 
 Из корня проекта:
 
-```bash
-mvn clean test
+```powershell
+mvn clean verify
 ```
 
 Для интеграционных тестов с Testcontainers необходим работающий Docker.
 
-**Последний подтверждённый успешный прогон: 26 октября 2026 года.**
+**Последний подтверждённый успешный прогон: 1 ноября 2026 года.**
 
 ```text
 [INFO] Reactor Summary:
 [INFO]
-[INFO] event-contracts 1.0.0 ............... SUCCESS
-[INFO] user-service 1.0-SNAPSHOT ........... SUCCESS
-[INFO] notification-service 0.0.1-SNAPSHOT . SUCCESS
-[INFO] aston-microservices 1.0.0 ........... SUCCESS
+[INFO] event-contracts 1.0.0 ................ SUCCESS
+[INFO] user-service 1.0-SNAPSHOT ............ SUCCESS
+[INFO] notification-service 0.0.1-SNAPSHOT .. SUCCESS
+[INFO] discovery-server 1.0.0 ............... SUCCESS
+[INFO] api-gateway 1.0.0 .................... SUCCESS
+[INFO] config-server 1.0.0 .................. SUCCESS
+[INFO] aston-microservices 1.0.0 ............ SUCCESS
 [INFO]
 [INFO] BUILD SUCCESS
-[INFO] Total time: 01:13 min
+[INFO] Total time: 01:38 min
 ```
 
-Все модули успешно прошли полный цикл `mvn clean test`.
+Все шесть Maven-модулей успешно прошли полный цикл `mvn clean verify`.
 
-Кроме автоматических тестов, вручную проверены REST API, создание и удаление пользователей, Kafka-события, сохранение уведомлений и отправка писем через Mailpit.
+### Ручные проверки домашнего задания №7
 
-Также проверены Swagger UI, OpenAPI JSON и реальные HAL-ответы API пользователей.
+Дополнительно проверены:
+
+| Проверка | Результат |
+|---|---|
+| Регистрация сервисов в Eureka | Успешно |
+| Маршрутизация `/api/users` через Gateway | HTTP 200 |
+| HATEOAS-ссылки через Gateway | Корректный адрес `localhost:8082` |
+| Отправка письма через Gateway | HTTP 202 |
+| Fallback при отказе notification-service | HTTP 503 |
+| Переход Circuit Breaker в OPEN | Подтверждён логами |
+| Восстановление после запуска сервиса | HTTP 202 |
+| Работа Config Server в Docker | Подтверждена |
+| Получение внешней конфигурации клиентами | Подтверждено |
+| Полный запуск Docker Compose | Успешно |
+
+Автоматизированные тесты, специально проверяющие Eureka, Gateway, Circuit Breaker и Config Server, пока не добавлены; эти сценарии проверялись вручную.
+
+---
 
 ## Остановка проекта
 
 Остановка контейнеров:
 
-```bash
+```powershell
 docker compose down
 ```
 
-Данные PostgreSQL сохраняются в Docker volumes.
+Данные PostgreSQL и Kafka сохраняются в Docker volumes.
 
-Для остановки с удалением данных:
+Остановка с удалением volumes:
 
-```bash
+```powershell
 docker compose down -v
 ```
 
-**Внимание:** параметр `-v` удаляет данные в Docker volumes, используемых проектом.
+**Внимание:** параметр `-v` удаляет данные в Docker volumes, используемых проектом. Использовать его следует только тогда, когда необходимо удалить сохранённые данные.
 
 ## Локальный запуск
 
-Для локального запуска необходимы Java 21, Maven, PostgreSQL и Kafka.
+Для локальной разработки необходимы Java 21, Maven, PostgreSQL, Kafka и SMTP-сервер.
 
 Микросервисы можно запускать отдельно через IntelliJ IDEA или Maven с соответствующими настройками подключения к инфраструктуре.
 
-Для работы уведомлений также необходим SMTP-сервер. При разработке можно использовать Mailpit.
+Для локального запуска Spring Cloud-компонентов используются порты:
 
-Основной способ запуска всего проекта — Docker Compose.
+```text
+discovery-server      8761
+config-server         8888
+api-gateway           8082
+user-service          8080
+notification-service  8081
+```
+
+При запуске Config Server через Maven из каталога модуля файловый путь для native profile:
+
+```properties
+spring.cloud.config.server.native.search-locations=file:../config-repo/
+```
+
+В Docker используется путь `/app/config-repo/`, подключённый через volume.
+
+Основной и рекомендуемый способ запуска всего учебного проекта — **Docker Compose**.
+
+---
+
+## Результат
+
+В проекте реализованы четыре микросервисных паттерна Spring Cloud:
+
+1. **Service Discovery** — регистрация и обнаружение сервисов через Eureka.
+2. **API Gateway** — маршрутизация HTTP-запросов через единый вход.
+3. **Circuit Breaker** — обработка отказов и восстановление через Resilience4j.
+4. **External Configuration** — централизованное предоставление настроек через Config Server.
+
+Существующие механизмы Kafka, Transactional Outbox, REST API, Swagger, HATEOAS, PostgreSQL и SMTP сохранены.
+
+Проект успешно собирается командой `mvn clean verify` и запускается через Docker Compose.

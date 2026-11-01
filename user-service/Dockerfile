@@ -11,6 +11,12 @@ COPY user-service/src ./user-service/src
 
 COPY notification-service/pom.xml ./notification-service/pom.xml
 
+COPY discovery-server/pom.xml ./discovery-server/pom.xml
+
+COPY api-gateway/pom.xml ./api-gateway/pom.xml
+
+COPY config-server/pom.xml ./config-server/pom.xml
+
 RUN mvn clean package -pl user-service -am -DskipTests
 
 FROM eclipse-temurin:21-jre

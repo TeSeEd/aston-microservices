@@ -10,6 +10,12 @@ COPY notification-service/pom.xml ./notification-service/pom.xml
 COPY event-contracts/src ./event-contracts/src
 COPY notification-service/src ./notification-service/src
 
+COPY discovery-server/pom.xml ./discovery-server/pom.xml
+
+COPY api-gateway/pom.xml ./api-gateway/pom.xml
+
+COPY config-server/pom.xml ./config-server/pom.xml
+
 RUN mvn clean package -pl notification-service -am -DskipTests
 
 FROM eclipse-temurin:21-jre

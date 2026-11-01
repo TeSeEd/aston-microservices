@@ -23,15 +23,22 @@ services:
       dockerfile: user-service/Dockerfile
     container_name: user-service-app
     depends_on:
+      discovery-server:
+        condition: service_started
       user-postgres:
         condition: service_healthy
       kafka:
         condition: service_started
+      config-server:
+        condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://user-postgres:5432/user_service
       SPRING_DATASOURCE_USERNAME: user_service_user
       SPRING_DATASOURCE_PASSWORD: admin123
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EUREKA_SERVER_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: user-service
+      CONFIG_SERVER_URL: http://config-server:8888
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -61,12 +68,16 @@ services:
       dockerfile: notification-service/Dockerfile
     container_name: notification-service-app
     depends_on:
+      discovery-server:
+        condition: service_started
       notification-postgres:
         condition: service_healthy
       kafka:
         condition: service_started
       mailpit:
         condition: service_started
+      config-server:
+        condition: service_healthy
     environment:
       DB_URL: jdbc:postgresql://notification-postgres:5432/notification_service
       DB_USERNAME: notification_service_user
@@ -77,6 +88,9 @@ services:
       SMTP_AUTH: "false"
       SMTP_STARTTLS: "false"
       MAIL_FROM: noreply@example.com
+      EUREKA_SERVER_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: notification-service
+      CONFIG_SERVER_URL: http://config-server:8888
     ports:
       - "127.0.0.1:8081:8081"
 
@@ -107,6 +121,49 @@ services:
     ports:
       - "127.0.0.1:1025:1025"
       - "127.0.0.1:8025:8025"
+
+  discovery-server:
+    build:
+      context: .
+      dockerfile: discovery-server/Dockerfile
+    container_name: discovery-server
+    ports:
+      - "127.0.0.1:8761:8761"
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    container_name: api-gateway
+    depends_on:
+      discovery-server:
+        condition: service_started
+      config-server:
+        condition: service_healthy
+    environment:
+      EUREKA_SERVER_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: api-gateway
+      CONFIG_SERVER_URL: http://config-server:8888
+    ports:
+      - "127.0.0.1:8082:8082"
+
+  config-server:
+    build:
+      context: .
+      dockerfile: config-server/Dockerfile
+    container_name: config-server
+    environment:
+      SPRING_CLOUD_CONFIG_SERVER_NATIVE_SEARCH_LOCATIONS: file:/app/config-repo/
+    volumes:
+      - ./config-repo:/app/config-repo:ro
+    ports:
+      - "127.0.0.1:8888:8888"
+    healthcheck:
+      test: ["CMD", "java", "-version"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
 volumes:
   user_postgres_data:
